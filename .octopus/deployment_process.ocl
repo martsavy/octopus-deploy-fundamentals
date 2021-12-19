@@ -1,0 +1,162 @@
+step "Calculate Deployment Mode" {
+
+    action {
+        notes = <<-EOT
+                **Always Run**
+                To calculate isredeploy or isrollback this deploy.
+            EOT
+        properties = {
+            Octopus.Action.Template.Id = "ActionTemplates-2"
+            Octopus.Action.Template.Version = "5"
+        }
+        worker_pool = "Default Worker Pool"
+    }
+}
+
+step "Run a Script" {
+    condition = "Variable"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{Octopus.Action[Calculate Deployment Mode].Output.RunOnRollback}#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Script"
+        is_disabled = true
+        properties = {
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                $apiKey = $OctopusParameters["Block.Octopus.Api.Key"]
+                $previousReleaseId = $OctopusParameters["Block.Octopus.Previous.Release.Id"]
+                $reason = $OctopusParameters["Block.Octopus.Reason"]
+                $octopusBaseUrl = $OctopusParameters["Block.Octopus.Url"]
+                $space = (Invoke-RestMethod -Method Get -Uri "$octopusBaseUrl/api/spaces/all" -Headers $header) | Where-Object {$_.Name -eq $spaceName}
+                
+                $spaceId = $OctopusParameters["Octopus.Space.Id"]
+                Write-Host "SpaceID: $spaceID"
+                write-Host "Id by space: $($space.Id)"
+                
+                $body = @{
+                	Description = $reason
+                }
+                $bodyAsJson = $body | ConvertTo-JSON -Depth 10
+                
+                $headers = @{"X-Octopus-ApiKey"="$apiKey"}
+                    
+                Write-Host "Blocking the release $previousReleaseId from progressing"
+                Invoke-RestMethod -Uri "$($octopusBaseUrl)/api/$($space.Id)/releases/$($previousReleaseId)/defects" -Method POST -Headers $headers -Body $bodyAsJSON -ContentType 'application/json; charset=utf-8'
+            EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+        }
+        worker_pool = "Default Worker Pool"
+    }
+}
+
+step "Block Release Progression" {
+    condition = "Variable"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{Octopus.Action[Calculate Deployment Mode].Output.RunOnRollback}#{/unless}"
+    }
+
+    action {
+        properties = {
+            Block.Octopus.Api.Key = "#{DeployProcess.api.key}"
+            Block.Octopus.Previous.Release.Id = "#{Octopus.Release.CurrentForEnvironment.Id}"
+            Block.Octopus.Reason = "Rolled back to #{Octopus.Release.Number}"
+            Block.Octopus.Url = "#{Octopus.Web.ServerUri}"
+            Octopus.Action.Template.Id = "ActionTemplates-3"
+            Octopus.Action.Template.Version = "1"
+        }
+        worker_pool_variable = ""
+    }
+}
+
+step "Check infrastructure" {
+
+    action {
+        action_type = "Octopus.Manual"
+        environments = ["Prod"]
+        is_disabled = true
+        notes = "Manual check production infrastructure."
+        properties = {
+            Octopus.Action.Manual.BlockConcurrentDeployments = "False"
+            Octopus.Action.Manual.Instructions = "Check that all production infrastructure is ready for deployment."
+            Octopus.Action.Manual.ResponsibleTeamIds = "Everyone"
+        }
+        worker_pool_variable = ""
+    }
+}
+
+step "Powershell Hello World!" {
+
+    action {
+        action_type = "Octopus.Script"
+        properties = {
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                $octopusBaseUrl = $OctopusParameters["Octopus.Web.BaseUrl"]
+                Write-Host "BaseUrl: $octopusBaseUrl"
+                $octopusServerUri = $OctopusParameters["Octopus.Web.ServerUri"]
+                Write-Host "BaseUrl: $octopusServerUri"
+                
+                
+                Write-Host $OctopusParameters["Octopus.Deployment.Id"]
+                Write-Host $OctopusParameters["helloworld.greetings"]
+                $name = $OctopusParameters["Octopus.Deployment.CreatedBy.DisplayName"]
+                Write-Host "Hello all from: $name"
+            EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+        }
+        worker_pool = "Default Worker Pool"
+    }
+}
+
+step "Run if Redeploy" {
+    condition = "Variable"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{Octopus.Action[Calculate Deployment Mode].Output.RunOnRedeploy}#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Script"
+        properties = {
+            Octopus.Action.Script.ScriptBody = "Write-Host \"This deployment is Redeploy\""
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+        }
+        worker_pool = "Default Worker Pool"
+    }
+}
+
+step "Run if Deploy" {
+    condition = "Variable"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{Octopus.Action[Calculate Deployment Mode].Output.RunOnDeploy}#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Script"
+        properties = {
+            Octopus.Action.Script.ScriptBody = "Write-Host \"This deployment is first Deploy\""
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+        }
+        worker_pool = "Default Worker Pool"
+    }
+}
+
+step "Run if RollBack" {
+    condition = "Variable"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{Octopus.Action[Calculate Deployment Mode].Output.RunOnRollback}#{/unless}"
+    }
+
+    action {
+        action_type = "Octopus.Script"
+        properties = {
+            Octopus.Action.Script.ScriptBody = "Write-Host \"This deployment is first RollBack\""
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+        }
+        worker_pool = "Default Worker Pool"
+    }
+}
